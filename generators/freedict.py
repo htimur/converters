@@ -1,3 +1,4 @@
+import sys
 import requests
 import asyncio
 import tarfile
@@ -5,8 +6,6 @@ import tarfile
 from os import path
 from pathlib import Path
 from theopendictionary import Dictionary as ODictionary
-from ctypes import *
-from os import path
 from tempfile import TemporaryDirectory
 from lxml import etree
 from bs4 import BeautifulSoup
@@ -30,19 +29,21 @@ def tei_to_odxml(tei_doc):
                 defs: list[Definition] = []
 
                 for cit in sense.findAll("cit"):
-                    defs.append(Definition(cit.getText().strip()))
+                    defs.append(Definition(cit.getText().strip().replace("\n", "; ")))
 
                 if len(defs) > 0:
                     usages.append(Usage(definitions=defs))
 
             if len(usages) > 0:
                 entries[term] = Entry(
-                    term, pronunciation=pron, etymologies=set([Etymology(usages)])
+                    term,
+                    pronunciation=pron,
+                    etymologies=set([Etymology(usages=usages)]),
                 )
                 bar()
 
     for entry in entries.values():
-        root.entries.append(entry.xml())
+        root.entries.append(entry)
 
     return etree.tostring(root.xml()).decode("utf-8")
 
@@ -55,6 +56,9 @@ def read_tei_archive(path):
             if ".tei" in member.name:
                 return f.read()
     return None
+
+
+dict_base = "dictionaries/freedict"
 
 
 async def process_dict(language_pair, url):
@@ -73,7 +77,6 @@ async def process_dict(language_pair, url):
 
         content = read_tei_archive(output_path)
         dictionary = tei_to_odxml(content)
-        dict_base = "dictionaries/freedict"
         dict_path = "%s/%s.odict" % (dict_base, language_pair)
 
         print('> Writing to "%s"...' % dict_path)
@@ -86,17 +89,21 @@ async def process_dict(language_pair, url):
 
 async def process():
 
-    Path("dictionaries").mkdir(parents=True, exist_ok=True)
+    Path(dict_base).mkdir(parents=True, exist_ok=True)
 
     json = requests.get("https://freedict.org/freedict-database.json").json()
 
     tasks = []
 
+    dict = sys.argv[1] if len(sys.argv) > 1 else "all"
+
     for j in json:
         if "name" in j:
             language_pair = j["name"]
             for release in j["releases"]:
-                if release["platform"] == "src":
+                if release["platform"] == "src" and (
+                    language_pair == dict or dict == "all"
+                ):
                     url = release["URL"]
                     tasks.append(
                         asyncio.ensure_future(process_dict(language_pair, url))
