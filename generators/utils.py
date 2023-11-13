@@ -82,7 +82,7 @@ class Usage:
 
     def xml(self):
         node = etree.Element(
-            "usage", attrib={"pos": self.pos, "description": self.description}
+            "sense", attrib={"pos": self.pos, "description": self.description}
         )
 
         for group in self.groups:

@@ -1,5 +1,6 @@
 from json import loads as load_json
 from os import makedirs, path
+from pprint import pprint
 import sys
 from tempfile import TemporaryDirectory
 
@@ -53,7 +54,6 @@ lang_map = {
 
 
 pos_tags = set()
-entries = {}
 
 
 def download_dictionary(lang: str, outdir: str):
@@ -82,99 +82,106 @@ def download_dictionary(lang: str, outdir: str):
 
 
 def run(target_lang: str):
+    entries = {}
+
     with TemporaryDirectory() as dirpath:
         dict_path = download_dictionary(target_lang, dirpath)
 
         with open(dict_path, "r") as f:
             with alive_bar(title="> Processing entries for %s..." % target_lang) as bar:
                 for line in f.readlines():
-                    try:
-                        json = load_json(line)
-                        raw_pos = json.get("pos")
-                        pos = pos_map.get(raw_pos) or raw_pos
-                        term = json.get("word")
-                        should_add = False
-                        pronunciation = (
-                            json.get("sounds")[0].get("ipa")
-                            if json.get("sounds") and len(json.get("sounds")) > 0
-                            else None
-                        ) or ""
+                    json = load_json(line)
+                    raw_pos = json.get("pos")
+                    pos = pos_map.get(raw_pos) or raw_pos
+                    term = json.get("word")
+                    should_add = False
+                    pronunciation = (
+                        json.get("sounds")[0].get("ipa")
+                        if json.get("sounds") and len(json.get("sounds")) > 0
+                        else None
+                    ) or ""
 
-                        etymology_description = json.get("etymology_text")
+                    etymology_description = json.get("etymology_text")
 
-                        root = DefinitionNode()
+                    root = DefinitionNode()
 
-                        senses = json.get("senses")
+                    senses = json.get("senses")
 
-                        for sense in senses:
-                            glosses = sense.get("glosses") or []
-                            raw_glosses = sense.get("raw_glosses") or glosses
-                            examples = [
-                                ex
-                                for item in filter(
-                                    lambda x: x.get("type") == "example"
-                                    or x.get("type") is None,
-                                    sense.get("examples") or [],
-                                )
-                                for ex in item.get("text").split("\n")
-                            ]
-
-                            if raw_glosses:
-                                definition_str = raw_glosses[-1]
-                                node = root
-
-                                for gloss in glosses:
-                                    if gloss not in node.definitions:
-                                        should_add = True
-                                        node.definitions[gloss] = DefinitionNode(
-                                            text=gloss
-                                        )
-                                    node = node.definitions[gloss]
-
-                                node.text = definition_str
-                                node.examples = examples
-
-                        if should_add:
-                            groups_and_defs = [
-                                node.convert() for node in root.definitions.values()
-                            ]
-
-                            groups = filter(
-                                lambda x: isinstance(x, Group), groups_and_defs
+                    for sense in senses:
+                        glosses = sense.get("glosses") or []
+                        raw_glosses = sense.get("raw_glosses") or glosses
+                        examples = [
+                            ex
+                            for item in filter(
+                                lambda x: x.get("type") == "example"
+                                or x.get("type") is None,
+                                sense.get("examples") or [],
                             )
+                            for ex in item.get("text").split("\n")
+                        ]
 
-                            defs = filter(
-                                lambda x: isinstance(x, Definition), groups_and_defs
-                            )
+                        if raw_glosses:
+                            definition_str = raw_glosses[-1]
+                            node = root
 
-                            usage = Usage(
-                                partOfSpeech=pos,
-                                groups=groups,
-                                definitions=defs,
-                            )
+                            for gloss in glosses:
+                                if gloss not in node.definitions:
+                                    should_add = True
+                                    node.definitions[gloss] = DefinitionNode(text=gloss)
+                                node = node.definitions[gloss]
 
-                            ety = Etymology(
-                                usages=[usage], description=etymology_description
-                            )
+                            node.text = definition_str
+                            node.examples = examples
 
-                            if term in entries:
-                                entries[term].etymologies.append(ety)
+                    if should_add:
+                        groups_and_defs = [
+                            node.convert() for node in root.definitions.values()
+                        ]
+
+                        groups = filter(lambda x: isinstance(x, Group), groups_and_defs)
+
+                        defs = filter(
+                            lambda x: isinstance(x, Definition), groups_and_defs
+                        )
+
+                        usage = Usage(
+                            partOfSpeech=pos,
+                            groups=groups,
+                            definitions=defs,
+                        )
+
+                        ety = Etymology(
+                            usages=[usage], description=etymology_description
+                        )
+
+                        if term in entries:
+                            if etymology_description in entries[term]["etymologies"]:
+                                entries[term]["etymologies"][
+                                    etymology_description
+                                ].usages.append(usage)
                             else:
-                                entries[term] = Entry(
-                                    term=term,
-                                    pronunciation=pronunciation,
-                                    etymologies=[ety],
-                                )
+                                entries[term]["etymologies"][
+                                    etymology_description
+                                ] = ety
+                        else:
+                            entries[term] = {
+                                "term": term,
+                                "pronunciation": pronunciation,
+                                "etymologies": {etymology_description: ety},
+                            }
 
-                        bar()
-                    except Exception as e:
-                        print(e)
-                        print("Received on line: " + line)
+                    bar()
 
         print("> Writing dictionary to file...")
 
         for entry in entries.values():
-            dict.entries.append(entry)
+            e = Entry(
+                term=entry["term"],
+                pronunciation=entry["pronunciation"],
+                etymologies=entry["etymologies"].values(),
+            )
+
+            dict.entries.append(e)
 
         dictionary = etree.tostring(dict.xml(), pretty_print=True).decode("utf-8")
 
