@@ -13,6 +13,30 @@ from alive_progress import alive_bar
 
 from utils import Definition, Dictionary, Entry, Etymology, Usage
 
+pos_map = {
+    'art': 'det',  # Articles as Determiners in odict
+    'ger': 'n',  # Gerunds function as nouns
+    'int': 'intj',
+    'vn': 'n',  # Verbal nouns are treated as nouns
+    'ptcl': 'part',
+    'suffix': 'suff',
+    'abbreviation': 'abv',
+    'interjection': 'intj',
+    'pn': 'propn',
+    'letter': 'sym',
+    'prefix': 'pref',
+    'preposition': 'prep',
+    'conjunction': 'conj',
+    'numeral': 'num',
+    'indefinitePronoun': 'pron', # indefinitePronoun are treated as Pronoun
+    'demonstrativePronoun': 'pron', # demonstrativePronoun are treated as Pronoun
+    'pronominalAdverb': 'adv', # treated as Adverb
+    'Adverb': 'adv',
+    'Adjective': 'adj',
+    'Verb': 'v',
+    'particle': 'part',
+    'postposition': 'prep'
+}
 
 def tei_to_odxml(tei_doc):
     document = BeautifulSoup(tei_doc, features="xml")
@@ -23,22 +47,29 @@ def tei_to_odxml(tei_doc):
         for entry in document.body.findAll("entry"):
             term = entry.orth.getText()
             pron = entry.pron.getText() if entry.pron is not None else ""
+            raw_pos = entry.gramGrp.pos.getText() if entry.gramGrp is not None and entry.gramGrp.pos is not None else "un"
+            pos = pos_map.get(raw_pos) or raw_pos
+            entry_desc = entry.find("def")
+            entry_desc = entry_desc.getText() if entry_desc is not None else ""
+
             usages: list[Usage] = []
 
             for sense in entry.findAll("sense"):
                 defs: list[Definition] = []
+                desc = sense.find("def")
+                desc = desc.getText() if desc is not None else ""
 
                 for cit in sense.findAll("cit"):
                     defs.append(Definition(cit.getText().strip().replace("\n", "; ")))
 
                 if len(defs) > 0:
-                    usages.append(Usage(definitions=defs))
+                    usages.append(Usage(definitions=defs, partOfSpeech=pos, description=desc))
 
             if len(usages) > 0:
                 entries[term] = Entry(
                     term,
                     pronunciation=pron,
-                    etymologies=set([Etymology(usages=usages)]),
+                    etymologies=set([Etymology(usages=usages, description=entry_desc)]),
                 )
                 bar()
 
@@ -84,7 +115,7 @@ async def process_dict(language_pair, url):
         with open("%s/%s.xml" % (dict_base, language_pair), "w") as f:
             f.write(dictionary)
 
-        ODictionary.write(dictionary, dict_path)
+        # ODictionary.write(dictionary, dict_path)
 
 
 async def process():
